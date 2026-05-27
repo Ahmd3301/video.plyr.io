@@ -259,7 +259,7 @@ async function loadStream(url){
                 }
             });
         } catch (err) {
-            showError('فشل تهيئة محرك البث Hls.js: ' + err.message);
+            showError('فشل تهيئة محرك البث Hls.js: ' + (err?.message || err));
         }
     } 
     else if(t.isDash || t.hasDRM) {
@@ -301,7 +301,7 @@ async function loadStream(url){
             heights.sort(function(a,b){return b-a;});
             initPlyrWithShaka(heights);
         } catch (err) {
-            showError('فشل تشغيل مشغل البث المشفر: ' + err.message);
+            showError('فشل تشغيل مشغل البث المشفر: ' + (err?.message || err));
         }
     } 
     else {
