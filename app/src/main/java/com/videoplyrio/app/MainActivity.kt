@@ -23,6 +23,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.webkit.WebViewAssetLoader
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
@@ -34,6 +35,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var mainWebView: WebView
     private lateinit var containerLayout: FrameLayout
     private var extractorWebView: WebView? = null
+    private lateinit var assetLoader: WebViewAssetLoader
 
     private var pendingPlaylistData: String? = null
     private var isPageLoaded = false
@@ -159,12 +161,26 @@ class MainActivity : AppCompatActivity() {
             cacheMode = WebSettings.LOAD_DEFAULT
         }
 
-        // تفعيل تسريع عتاد الـ GPU لمنع بطء الرندرة في تشغيل الفيديو ذو الإطارات الكثيفة
         mainWebView.setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
+
+        assetLoader = WebViewAssetLoader.Builder()
+            .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this))
+            .build()
 
         mainWebView.addJavascriptInterface(WebAppInterface(this), "AndroidBridge")
 
         mainWebView.webViewClient = object : WebViewClient() {
+            override fun shouldInterceptRequest(
+                view: WebView?,
+                request: WebResourceRequest?
+            ): WebResourceResponse? {
+                val url = request?.url ?: return null
+                val response = assetLoader.shouldInterceptRequest(url)
+                if (response != null) return response
+
+                return super.shouldInterceptRequest(view, request)
+            }
+
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
                 isPageLoaded = true
@@ -177,9 +193,9 @@ class MainActivity : AppCompatActivity() {
 
         val hasDeepLink = intent?.data != null
         val targetUrl = if (hasDeepLink)
-            "file:///android_asset/player.html?deeplink=true"
+            "https://appassets.androidplatform.net/assets/player.html?deeplink=true"
         else
-            "file:///android_asset/player.html"
+            "https://appassets.androidplatform.net/assets/player.html"
 
         mainWebView.loadUrl(targetUrl)
     }
