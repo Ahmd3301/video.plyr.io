@@ -10,6 +10,7 @@ import android.os.Looper
 import android.view.Gravity
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.SslErrorHandler
 import android.webkit.WebResourceRequest
@@ -18,6 +19,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
+import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
@@ -57,12 +59,11 @@ class MainActivity : AppCompatActivity() {
     private var lastAttemptedUrl: String? = null
 
     companion object {
-        private const val POLL_INTERVAL_MS = 50L
+        private const val POLL_INTERVAL_MS = 100L
 
+        // استخدام معرف متصفح حديث ومتوافق مع أندرويد لتفادي إثارة شكوك خوارزميات الحماية
         private const val DESKTOP_UA =
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
-            "AppleWebKit/537.36 (KHTML, like Gecko) " +
-            "Chrome/124.0.0.0 Safari/537.36"
+            "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
 
         private val BLOCKED_EXTENSIONS = listOf(
             ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg",
@@ -82,6 +83,9 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         applyFullscreenFlags()
+
+        // تهيئة مدير ملفات تعريف الارتباط للنظام بالكامل قبل أي عملية تحميل
+        setupCookieManager()
 
         containerLayout = FrameLayout(this).apply {
             layoutParams = ViewGroup.LayoutParams(
@@ -107,6 +111,14 @@ class MainActivity : AppCompatActivity() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() { finishAffinity() }
         })
+    }
+
+    private fun setupCookieManager() {
+        val cookieManager = CookieManager.getInstance()
+        cookieManager.setAcceptCookie(true)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            cookieManager.setAcceptThirdPartyCookies(mainWebView, true)
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -159,7 +171,6 @@ class MainActivity : AppCompatActivity() {
         }
 
         mainWebView.setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
-
         mainWebView.addJavascriptInterface(WebAppInterface(this), "AndroidBridge")
 
         mainWebView.webViewClient = object : WebViewClient() {
@@ -213,8 +224,10 @@ class MainActivity : AppCompatActivity() {
         }
 
         networkExecutor.execute {
+            var urlConnection: HttpURLConnection? = null
             try {
-                val urlConnection = URL(targetUrl).openConnection() as HttpURLConnection
+                val url = URL(targetUrl)
+                urlConnection = url.openConnection() as HttpURLConnection
                 urlConnection.apply {
                     requestMethod = "GET"
                     connectTimeout = 6000
@@ -277,6 +290,8 @@ class MainActivity : AppCompatActivity() {
                         stopExtractionWithError("خطأ أثناء الاستخراج السريع: ${e.message}")
                     }
                 }
+            } finally {
+                urlConnection?.disconnect()
             }
         }
     }
@@ -285,16 +300,15 @@ class MainActivity : AppCompatActivity() {
         var unpacked = p
         for (i in c - 1 downTo 0) {
             if (i < k.size && k[i].isNotEmpty()) {
-                val word36 = java.lang.Integer.toString(i, 36)
-                val safeReplacement = java.util.regex.Matcher.quoteReplacement(k[i])
-                unpacked = unpacked.replace(Regex("\\b$word36\\b"), safeReplacement)
+                val word36 = java.util.regex.Matcher.quoteReplacement(k[i])
+                unpacked = unpacked.replace(Regex("\\b${java.lang.Integer.toString(i, 36)}\\b"), word36)
             }
         }
         return unpacked
     }
 
     // ============================================================
-    // WebView Extraction (تصفح خلفي محسن وخارق لـ فاصل إعلاني)
+    // WebView Extraction (مُعدّل لإظهار تحديات التحقق وحفظ الكوكيز)
     // ============================================================
 
     fun startBackgroundExtraction(mainUrl: String) {
@@ -309,9 +323,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         val currentTimeoutMs = when (extractionAttemptCount) {
-            1 -> 5000L
-            2 -> 10000L
-            else -> 15000L
+            1 -> 15000L // زيادة مهلة الانتظار الافتراضية لإعطاء وقت لحل التحقق البشري
+            2 -> 25000L
+            else -> 35000L
         }
 
         runOnUiThread {
@@ -319,12 +333,14 @@ class MainActivity : AppCompatActivity() {
         }
 
         networkExecutor.execute {
+            var urlConnection: HttpURLConnection? = null
             try {
-                val urlConnection = URL(mainUrl).openConnection() as HttpURLConnection
+                val url = URL(mainUrl)
+                urlConnection = url.openConnection() as HttpURLConnection
                 urlConnection.apply {
                     requestMethod = "GET"
-                    connectTimeout = 4000
-                    readTimeout = 4000
+                    connectTimeout = 5000
+                    readTimeout = 5000
                     setRequestProperty("User-Agent", DESKTOP_UA)
                 }
 
@@ -342,6 +358,7 @@ class MainActivity : AppCompatActivity() {
                     if (!isExtracting) return@runOnUiThread
                     extractorWebView = buildExtractorWebView()
 
+                    // يتم البث مبدئياً بحجم بكسل واحد مخفي
                     val layoutParams = FrameLayout.LayoutParams(1, 1).apply {
                         gravity = Gravity.BOTTOM or Gravity.END
                     }
@@ -364,6 +381,8 @@ class MainActivity : AppCompatActivity() {
                     extractorWebView?.webViewClient = buildStage2Client()
                     extractorWebView?.loadUrl(mainUrl)
                 }
+            } finally {
+                urlConnection?.disconnect()
             }
         }
 
@@ -372,22 +391,58 @@ class MainActivity : AppCompatActivity() {
 
     private fun buildExtractorWebView(): WebView {
         return WebView(this@MainActivity).apply {
+            // تفعيل الكوكيز بشكل خاص لـ متصفح الاستخراج لضمان حفظ حالة التخطي
+            CookieManager.getInstance().setAcceptCookie(true)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+            }
+
             settings.apply {
                 javaScriptEnabled = true
                 domStorageEnabled = true
                 userAgentString   = DESKTOP_UA
                 mixedContentMode  = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                loadsImagesAutomatically = false
-                blockNetworkImage        = true
+                
+                // تفعيل تحميل الصور والوسائط لكي تظهر أيقونات وتحديات اختبار التحقق (Turnstile) بدون مشاكل
+                loadsImagesAutomatically = true
+                blockNetworkImage        = false
                 setRenderPriority(WebSettings.RenderPriority.HIGH)
             }
+
             webChromeClient = object : android.webkit.WebChromeClient() {
                 override fun onProgressChanged(view: WebView?, newProgress: Int) {
                     super.onProgressChanged(view, newProgress)
-                    if (newProgress >= 30 && isExtracting) {
+                    if (newProgress >= 20 && isExtracting) {
                         startPollingForM3u8()
                     }
                 }
+            }
+        }
+    }
+
+    private fun showChallengeInterface() {
+        runOnUiThread {
+            extractorWebView?.let { webView ->
+                // تحويل حجم المتصفح لملء الشاشة مع المحاذاة للواجهة لتسهيل عملية النقر اليدوي
+                val params = FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+                webView.layoutParams = params
+                webView.bringToFront()
+                Toast.makeText(this@MainActivity, "يرجى تأكيد أنك لست روبوت لتشغيل الفيديو", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun hideChallengeInterface() {
+        runOnUiThread {
+            extractorWebView?.let { webView ->
+                // إرجاع المتصفح إلى الخلفية بحجم صغير بعد إتمام الفحص
+                val params = FrameLayout.LayoutParams(1, 1).apply {
+                    gravity = Gravity.BOTTOM or Gravity.END
+                }
+                webView.layoutParams = params
             }
         }
     }
@@ -402,6 +457,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun shouldBlockResource(urlStr: String): Boolean {
+        // إذا كنا في صفحة التحقق، يفضل عدم حجب أي ملفات CSS أو تفاعلية لتلافي انهيار اختبار الحماية
+        val isChecking = extractorWebView?.title?.lowercase()?.contains("cloudflare") == true || 
+                         extractorWebView?.url?.contains("challenges") == true
+        if (isChecking) return false
+
         val lower = urlStr.lowercase()
         return BLOCKED_EXTENSIONS.any { lower.contains(it) } ||
                BLOCKED_DOMAINS.any    { lower.contains(it) }
@@ -414,7 +474,12 @@ class MainActivity : AppCompatActivity() {
     private fun buildStage2Client(): WebViewClient {
         return object : WebViewClient() {
             override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: SslError?) {
-                handler?.proceed()
+                // تفعيل التجاوز الآمن لـ SSL في بيئات التطوير وتفادي الرفض في الإنتاج
+                if (BuildConfig.DEBUG) {
+                    handler?.proceed()
+                } else {
+                    handler?.cancel()
+                }
             }
 
             override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
@@ -430,9 +495,37 @@ class MainActivity : AppCompatActivity() {
                 return null
             }
 
+            override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                super.onPageStarted(view, url, favicon)
+                // رصد ومراقبة روابط ونطاقات التحدي عند بدء التحميل
+                if (url != null && (url.contains("challenges.cloudflare") || url.contains("challenge-platform"))) {
+                    showChallengeInterface()
+                }
+            }
+
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
-                startPollingForM3u8()
+                
+                // حفظ وحقن الكوكيز بشكل صريح لضمان ثبات الجلسة للمستقبل
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    CookieManager.getInstance().flush()
+                }
+
+                val currentTitle = view?.title?.lowercase() ?: ""
+                val currentUrl = url?.lowercase() ?: ""
+
+                // إذا كانت صفحة التحقق معروضة حالياً، نقوم بعرض الواجهة فوراً لتفاعل المستخدم
+                if (currentTitle.contains("cloudflare") || 
+                    currentTitle.contains("just a moment") || 
+                    currentTitle.contains("checking your browser") ||
+                    currentUrl.contains("challenges.cloudflare") ||
+                    currentUrl.contains("challenge")) {
+                    showChallengeInterface()
+                } else {
+                    // إذا لم نكن في صفحة التحقق، يتم الإخفاء والاستمرار بالبحث الصامت
+                    hideChallengeInterface()
+                    startPollingForM3u8()
+                }
             }
         }
     }
@@ -481,6 +574,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun onM3u8Found(url: String) {
         if (!isExtracting) return
+        
+        // حفظ توكنات الجلسة والكوكيز فور نجاح العملية لضمان استمراريتها للطلبات القادمة
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            CookieManager.getInstance().flush()
+        }
+
         runOnUiThread {
             stopExtraction()
             mainWebView.evaluateJavascript("window.playExtractedUrl('${url.replace("'", "\\'")}')", null)
@@ -502,10 +601,12 @@ class MainActivity : AppCompatActivity() {
         pollingRunnable?.let { handler.removeCallbacks(it) }
         pollingRunnable = null
         runOnUiThread {
-            extractorWebView?.let {
-                containerLayout.removeView(it)
-                it.stopLoading()
-                it.destroy()
+            extractorWebView?.let { webView ->
+                containerLayout.removeView(webView)
+                webView.stopLoading()
+                webView.clearHistory()
+                webView.loadUrl("about:blank")
+                webView.destroy()
             }
             extractorWebView = null
         }
