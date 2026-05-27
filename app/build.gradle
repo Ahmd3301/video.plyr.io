@@ -1,0 +1,32 @@
+plugins {
+    id 'com.android.application' version '9.0.1'
+}
+
+android {
+    namespace 'com.videoplyrio.app'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.videoplyrio.app"
+        minSdk 21
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt')
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core-ktx:1.12.0'
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+}

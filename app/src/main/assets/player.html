@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>مشغل الفيديو فائق السرعة</title>
+<script>
+Object.defineProperty(document, 'pictureInPictureEnabled', { get: function() { return true; }, configurable: true });
+HTMLVideoElement.prototype.requestPictureInPicture = async function() {
+    if (window.AndroidBridge && typeof window.AndroidBridge.enterPip === 'function') window.AndroidBridge.enterPip();
+    return {};
+};
+if (!document.exitPictureInPicture) document.exitPictureInPicture = async function() { return {}; };
+</script>
+<link rel="stylesheet" href="file:///android_asset/plyr.css">
+<script src="file:///android_asset/plyr.js"></script>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+:root { --plyr-color-main: rgba(255,255,255,0.4) !important; }
+.plyr--full-ui input[type=range] { color:#fff !important; }
+.plyr__control--overlaid { background:rgba(255,255,255,0.15) !important; }
+.plyr--video .plyr__control.plyr__tab-focus, .plyr--video .plyr__control:hover, .plyr--video .plyr__control[aria-expanded=true] { background:rgba(255,255,255,0.2) !important; color:#fff !important; }
+.plyr__menu__container { background:rgba(255,255,255,0.12) !important; backdrop-filter:blur(15px) !important; -webkit-backdrop-filter:blur(15px) !important; border:none !important; color:#fff !important; }
+.plyr__menu__container .plyr__control { color:#fff !important; }
+.plyr__menu__container [role="menuitemradio"][aria-checked="true"]::before { background:#fff !important; }
+body,html { width:100%; height:100%; background:#000; overflow:hidden; padding:0 !important; }
+.video-player-container { width:100%; height:100%; position:relative; background:#000; }
+.video-player-container video.raw-video { position:absolute; opacity:0; pointer-events:none; width:1px; height:1px; }
+.plyr,.plyr--video { width:100% !important; height:100% !important; max-width:100% !important; max-height:100% !important; background:#000 !important; }
+.plyr__video-wrapper { width:100% !important; height:100% !important; }
+.plyr.mode-contain .plyr__video-wrapper video { object-fit:contain !important; width:100% !important; height:100% !important; }
+.plyr.mode-cover .plyr__video-wrapper video { object-fit:cover !important; width:100% !important; height:100% !important; }
+.plyr.mode-fill .plyr__video-wrapper video { object-fit:fill !important; width:100% !important; height:100% !important; }
+.plyr.mode-original .plyr__video-wrapper video { object-fit:none !important; width:auto !important; height:auto !important; max-width:100% !important; max-height:100% !important; }
+.plyr--pip-active .plyr__controls, .plyr--pip-active .plyr__title { display:none !important; }
+.plyr__title { position:absolute; bottom:calc(48px + 16px); left:20px; z-index:12; font-size:15px !important; color:#fff !important; background:rgba(255,255,255,0.12) !important; border-radius:4px !important; padding:6px 14px !important; height:34px !important; line-height:34px !important; cursor:pointer; display:inline-flex; align-items:center; gap:6px; opacity:0; visibility:hidden; transform:translateY(10px); backdrop-filter:blur(4px); -webkit-backdrop-filter:blur(4px); }
+.plyr--controls-visible .plyr__title { opacity:1 !important; visibility:visible !important; transform:translateY(0); }
+.plyr__playlist { position:absolute; left:20px; right:20px; bottom:calc(48px + 16px + 34px + 16px); z-index:20; transform:translateY(20px) scale(0.98); opacity:0; visibility:hidden; transition:all 0.5s cubic-bezier(0.4,0,0.2,1); overflow:hidden; pointer-events:none; }
+.plyr--controls-visible.playlist-open .plyr__playlist { transform:translateY(0) scale(1); opacity:1; visibility:visible; pointer-events:auto; }
+.playlist-wrapper { display:flex; gap:16px; overflow-x:auto; scrollbar-width:none; }
+.playlist-wrapper::-webkit-scrollbar { display:none; }
+.playlist-item { flex:0 0 auto; width:240px; height:135px; color:#fff !important; background:rgba(255,255,255,0.12) !important; border-radius:4px !important; display:inline-flex; align-items:center; justify-content:center; text-align:center; padding:10px; font-size:13px; line-height:1.4; backdrop-filter:blur(4px); -webkit-backdrop-filter:blur(4px); cursor:pointer; transition:background 0.2s ease; }
+.playlist-item.active { background:rgba(255,255,255,0.25) !important; }
+.playlist-item:active { background:rgba(255,255,255,0.2) !important; }
+.plyr__controls { background:transparent !important; padding:0 20px 10px !important; z-index:10; }
+#error-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.88); display:none; align-items:center; justify-content:center; flex-direction:column; gap:14px; z-index:9999; padding:30px; font-family:sans-serif; }
+#error-overlay.visible { display:flex; }
+#error-overlay .err-icon { font-size:46px; }
+#error-overlay .err-msg { color:#fff; font-size:15px; text-align:center; opacity:0.85; max-width:320px; line-height:1.6; white-space:pre-line; }
+#error-overlay .err-retry { margin-top:6px; padding:10px 30px; background:rgba(255,255,255,0.15); color:#fff; border:1px solid rgba(255,255,255,0.3); border-radius:6px; font-size:14px; cursor:pointer; backdrop-filter:blur(4px); }
+#extract-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.82); display:none; align-items:center; justify-content:center; flex-direction:column; gap:16px; z-index:9998; font-family:sans-serif; }
+#extract-overlay.visible { display:flex; }
+.extract-spinner { width:50px; height:50px; border:4px solid rgba(255,255,255,0.15); border-top-color:#fff; border-radius:50%; animation:spin 0.75s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+.extract-label { color:#fff; font-size:14px; opacity:0.75; }
+</style>
+</head>
+<body>
+<div style="display:none" aria-hidden="true"><?xml version="1.0" encoding="UTF-8"?><!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd"><svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><symbol id="plyr-airplay" viewBox="0 0 18 18"><path d="M16 1H2a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3v-2H3V3h12v8h-2v2h3a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1"/><path d="M4 17h10l-5-6z"/></symbol><symbol id="plyr-captions-off" viewBox="0 0 18 18"><path fill-opacity=".5" fill-rule="evenodd" d="M1 1c-.6 0-1 .4-1 1v11c0 .6.4 1 1 1h4.6l2.7 2.7c.2.2.4.3.7.3s.5-.1.7-.3l2.7-2.7H17c.6 0 1-.4 1-1V2c0-.6-.4-1-1-1zm4.52 10.15c1.99 0 3.01-1.32 3.28-2.41l-1.29-.39c-.19.66-.78 1.45-1.99 1.45-1.14 0-2.2-.83-2.2-2.34 0-1.61 1.12-2.37 2.18-2.37 1.23 0 1.78.75 1.95 1.43l1.3-.41C8.47 4.96 7.46 3.76 5.5 3.76c-1.9 0-3.61 1.44-3.61 3.7s1.65 3.69 3.63 3.69m7.57 0c1.99 0 3.01-1.32 3.28-2.41l-1.29-.39c-.19.66-.78 1.45-1.99 1.45-1.14 0-2.2-.83-2.2-2.34 0-1.61 1.12-2.37 2.18-2.37 1.23 0 1.78.75 1.95 1.43l1.3-.41c-.28-1.15-1.29-2.35-3.25-2.35-1.9 0-3.61 1.44-3.61 3.7s1.65 3.69 3.63 3.69"/></symbol><symbol id="plyr-captions-on" viewBox="0 0 18 18"><path fill-rule="evenodd" d="M1 1c-.6 0-1 .4-1 1v11c0 .6.4 1 1 1h4.6l2.7 2.7c.2.2.4.3.7.3s.5-.1.7-.3l2.7-2.7H17c.6 0 1-.4 1-1V2c0-.6-.4-1-1-1zm4.52 10.15c1.99 0 3.01-1.32 3.28-2.41l-1.29-.39c-.19.66-.78 1.45-1.99 1.45-1.14 0-2.2-.83-2.2-2.34 0-1.61 1.12-2.37 2.18-2.37 1.23 0 1.78.75 1.95 1.43l1.3-.41C8.47 4.96 7.46 3.76 5.5 3.76c-1.9 0-3.61 1.44-3.61 3.7s1.65 3.69 3.63 3.69m7.57 0c1.99 0 3.01-1.32 3.28-2.41l-1.29-.39c-.19.66-.78 1.45-1.99 1.45-1.14 0-2.2-.83-2.2-2.34 0-1.61 1.12-2.37 2.18-2.37 1.23 0 1.78.75 1.95 1.43l1.3-.41c-.28-1.15-1.29-2.35-3.25-2.35-1.9 0-3.61 1.44-3.61 3.7s1.65 3.69 3.63 3.69"/></symbol><symbol id="plyr-download" viewBox="0 0 18 18"><path d="M9 13c.3 0 .5-.1.7-.3L15.4 7 14 5.6l-4 4V1H8v8.6l-4-4L2.6 7l5.7 5.7c.2.2.4.3.7.3m-7 2h14v2H2z"/></symbol><symbol id="plyr-enter-fullscreen" viewBox="0 0 18 18"><path d="M10 3h3.6l-4 4L11 8.4l4-4V8h2V1h-7zM7 9.6l-4 4V10H1v7h7v-2H4.4l4-4z"/></symbol><symbol id="plyr-exit-fullscreen" viewBox="0 0 18 18"><path d="M1 12h3.6l-4 4L2 17.4l4-4V17h2v-7H1zM16 .6l-4 4V1h-2v7h7V6h-3.6l4-4z"/></symbol><symbol id="plyr-fast-forward" viewBox="0 0 18 18"><path d="M7.875 7.171 0 1v16l7.875-6.171V17L18 9 7.875 1z"/></symbol><symbol id="plyr-logo-vimeo" viewBox="0 0 18 18"><path d="M17 5.3c-.1 1.6-1.2 3.7-3.3 6.4-2.2 2.8-4 4.2-5.5 4.2-.9 0-1.7-.9-2.4-2.6C5 10.9 4.4 6 3 6c-.1 0-.5.3-1.2.8l-.8-1c.8-.7 3.5-3.4 4.7-3.5S7.7 3 8 4.8c.3 2 .8 6.1 1.8 6.1.9 0 2.5-3.4 2.6-4 .1-.9-.3-1.9-2.3-1.1.8-2.6 2.3-3.8 4.5-3.8q2.55.15 2.4 3.3"/></symbol><symbol id="plyr-logo-youtube" viewBox="0 0 18 18"><path d="M16.8 5.8c-.2-1.3-.8-2.2-2.2-2.4C12.4 3 9 3 9 3s-3.4 0-5.6.4C2 3.6 1.3 4.5 1.2 5.8 1 7.1 1 9 1 9s0 1.9.2 3.2.8 2.2 2.2 2.4C5.6 15 9 15 9 15s3.4 0 5.6-.4c1.4-.3 2-1.1 2.2-2.4S17 9 17 9s0-1.9-.2-3.2M7 12V6l5 3z"/></symbol><symbol id="plyr-muted" viewBox="0 0 18 18"><path d="m12.4 12.5 2.1-2.1 2.1 2.1 1.4-1.4L15.9 9 18 6.9l-1.4-1.4-2.1 2.1-2.1-2.1L11 6.9 13.1 9 11 11.1zM3.786 6.008H.714C.286 6.008 0 6.31 0 6.76v4.512c0 .452.286.752.714.752h3.072l4.071 3.858c.5.3 1.143 0 1.143-.602V2.752c0-.601-.643-.977-1.143-.601z"/></symbol><symbol id="plyr-pause" viewBox="0 0 18 18"><path d="M6 1H3c-.6 0-1 .4-1 1v14c0 .6.4 1 1 1h3c.6 0 1-.4 1-1V2c0-.6-.4-1-1-1m6 0c-.6 0-1 .4-1 1v14c0 .6.4 1 1 1h3c.6 0 1-.4 1-1V2c0-.6-.4-1-1-1z"/></symbol><symbol id="plyr-pip" viewBox="0 0 18 18"><path d="M13.293 3.293 7.022 9.564l1.414 1.414 6.271-6.271L17 7V1h-6z"/><path d="M13 15H3V5h5V3H2a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-6h-2z"/></symbol><symbol id="plyr-play" viewBox="0 0 18 18"><path d="M15.562 8.1 3.87.225c-.818-.562-1.87 0-1.87.9v15.75c0 .9 1.052 1.462 1.87.9L15.563 9.9c.584-.45.584-1.35 0-1.8"/></symbol><symbol id="plyr-restart" viewBox="0 0 18 18"><path d="m9.7 1.2.7 6.4 2.1-2.1c1.9 1.9 1.9 5.1 0 7-.9 1-2.2 1.5-3.5 1.5s-2.6-.5-3.5-1.5c-1.9-1.9-1.9-5.1 0-7 .6-.6 1.4-1.1 2.3-1.3l-.6-1.9C6 2.6 4.9 3.2 4 4.1 1.3 6.8 1.3 11.2 4 14c1.3 1.3 3.1 2 4.9 2 1.9 0 3.6-.7 4.9-2 2.7-2.7 2.7-7.1 0-9.9L16 1.9z"/></symbol><symbol id="plyr-rewind" viewBox="0 0 18 18"><path d="M10.125 1 0 9l10.125 8v-6.171L18 17V1l-7.875 6.171z"/></symbol><symbol id="plyr-settings" viewBox="0 0 18 18"><path d="M16.135 7.784a2 2 0 0 1-1.23-2.969c.322-.536.225-.998-.094-1.316l-.31-.31c-.318-.318-.78-.415-1.316-.094a2 2 0 0 1-2.969-1.23C10.065 1.258 9.669 1 9.219 1h-.438c-.45 0-.845.258-.997.865a2 2 0 0 1-2.969 1.23c-.536-.322-.999-.225-1.317.093l-.31.31c-.318.318-.415.781-.093 1.317a2 2 0 0 1-1.23 2.969C1.26 7.935 1 8.33 1 8.781v.438c0 .45.258.845.865.997a2 2 0 0 1 1.23 2.969c-.322.536-.225.998.094 1.316l.31.31c.319.319.782.415 1.316.094a2 2 0 0 1 2.969 1.23c.151.607.547.865.997.865h.438c.45 0 .845-.258.997-.865a2 2 0 0 1 2.969-1.23c.535.321.997.225 1.316-.094l.31-.31c.318-.318.415-.781.094-1.316a2 2 0 0 1 1.23-2.969c.607-.151.865-.547.865-.997M9 12a3 3 0 1 1 0-6 3 3 0 0 1 0 6"/></symbol><symbol id="plyr-volume" viewBox="0 0 18 18"><path d="M15.6 3.3c-.4-.4-1-.4-1.4 0s-.4 1 0 1.4C15.4 5.9 16 7.4 16 9s-.6 3.1-1.8 4.3c-.4.4-.4 1 0 1.4.2.2.5.3.7.3.3 0 .5-.1.7-.3C17.1 13.2 18 11.2 18 9s-.9-4.2-2.4-5.7"/><path d="M11.282a.91.91 0 0 0 0 1.316c.735.735.995 1.458.995 2.402 0 .936-.425 1.917-.995 2.487a.91.91 0 0 0 0 1.316c.145.145.636.262 1.018.156a.7.7 0 0 0 .298-.156C13.773 11.733 14.13 10.16 14.13 9q.001-.255-.011-.51c-.053-.992-.319-2.005-1.522-3.208a.91.91 0 0 0-1.316 0m-7.495.726H.714C.286 6.008 0 6.31 0 6.76v4.512c0 .452.286.752.714.752h3.072l4.071 3.858c.5.3 1.143 0 1.143-.602V2.752c0-.601-.643-.977-1.143-.601z"/></symbol></svg></div>
+<div class="video-player-container"></div>
+<div id="error-overlay"><div class="err-icon">&#9888;&#65039;</div><div class="err-msg" id="err-msg-text">&#1601;&#158ش;&#1604; &#1578;&#1581;&#1605;&#1610;&#1604; &#1575;&#1604;&#1576;&#1579;</div><button class="err-retry" id="err-retry-btn">&#1573;&#1593;&#1575;&#1583;&#1577; &#1575;&#1604;&#1605;&#1581;&#1575;&#1608;&#1604;&#1577;</button></div>
+<div id="extract-overlay"><div class="extract-spinner"></div><div class="extract-label" id="extract-label-text">&#1580;&#1575;&#1585;&#1613; &#1575;&#1587;&#1578;&#1582;&#1585;&#1575;&#1580; &#1575;&#1604;&#1585;&#1575;&#1576;&#1591;...</div></div>
+
+<script>
+'use strict';
+var hlsPlayer=null,shakaPlayer=null,plyrPlayer=null,playerContainer=null,videoElement=null,titleElement=null,playlistElement=null;
+var isPlaylistOpen=false,isLoading=false,lastUrl=null,originalSourceUrl=null;
+var modes=['mode-contain','mode-cover','mode-fill','mode-original'],currentMode=2;
+var currentPlaylist=[
+    {title:"Video #01",src:"https://cdn.plyr.io/static/demo/View_From_A_Blue_Moon_Trailer-720p.mp4"},
+    {title:"Video #02",src:"https://cdn.plyr.io/static/demo/View_From_A_Blue_Moon_Trailer-1080p.mp4"}
+];
+var currentSrc=currentPlaylist[0].src,currentTitle=currentPlaylist[0].title,currentIndex=0;
+
+var errorOverlay=document.getElementById('error-overlay');
+var errMsgText=document.getElementById('err-msg-text');
+var errRetryBtn=document.getElementById('err-retry-btn');
+var extractOverlay=document.getElementById('extract-overlay');
+var extractLabelText=document.getElementById('extract-label-text');
+
+var LIBS = {
+    hls: "file:///android_asset/hls.min.js",
+    shaka: "file:///android_asset/shaka-player.js"
+};
+
+function injectScript(src) {
+    return new Promise(function(resolve, reject) {
+        if (document.querySelector('script[src="' + src + '"]')) {
+            resolve();
+            return;
+        }
+        var s = document.createElement('script');
+        s.src = src;
+        s.onload = resolve;
+        s.onerror = reject;
+        document.head.appendChild(s);
+    });
+}
+
+function showError(msg){
+    hideExtractOverlay();
+    errMsgText.textContent=msg||'فشل تحميل البث';
+    errorOverlay.classList.add('visible');
+}
+function hideError(){errorOverlay.classList.remove('visible');}
+function showExtractOverlay(msg){
+    extractLabelText.textContent=msg||'جاري استخراج الرابط...';
+    extractOverlay.classList.add('visible');
+}
+function hideExtractOverlay(){extractOverlay.classList.remove('visible');}
+
+window.showExtractionError = function(msg) {
+    showError(msg);
+};
+window.showLoadingLoop = function() {
+    showExtractOverlay('جاري استخراج الرابط...');
+};
+window.hideLoadingLoop = hideExtractOverlay;
+
+errRetryBtn.addEventListener('click',function(){
+    hideError();
+    if (originalSourceUrl) {
+        loadStream(originalSourceUrl);
+    } else if (lastUrl) {
+        loadStream(lastUrl);
+    }
+});
+
+function detectType(url){
+    var woDRM=url.split('###')[0],woHash=woDRM.split('#')[0];
+    var path=woHash.split('?')[0].toLowerCase(),full=woDRM.toLowerCase();
+    return{
+        isHls: path.endsWith('.m3u8')||path.indexOf('.m3u8/')!==-1||full.indexOf('.m3u8')!==-1,
+        isDash:path.endsWith('.mpd') ||path.indexOf('.mpd/')  !==-1||full.indexOf('.mpd')  !==-1,
+        hasDRM:url.indexOf('###')!==-1
+    };
+}
+function isFaselTarget(url){
+    if(url.indexOf('##ex')!==-1)return false;
+    var c=url.split('###')[0].split('?')[0].toLowerCase();
+    return c.indexOf('fasel')!==-1&&c.indexOf('.m3u8')===-1&&c.indexOf('.mpd')===-1&&c.indexOf('.mp4')===-1;
+}
+function base64ToHex(str){
+    var b64=str.replace(/-/g,'+').replace(/_/g,'/');
+    while(b64.length%4!==0)b64+='=';
+    try{var raw=window.atob(b64),hex='';for(var i=0;i<raw.length;i++){var h=raw.charCodeAt(i).toString(16);hex+=h.length===1?'0'+h:h;}return hex;}catch(e){return str;}
+}
+
+function updateQualityMenuUI(selectedQuality) {
+    if (!playerContainer) return;
+    var items = playerContainer.querySelectorAll('[role="menuitemradio"][value]');
+    items.forEach(function(item) {
+        var val = item.getAttribute('value');
+        if (val === String(selectedQuality)) {
+            item.setAttribute('aria-checked', 'true');
+        } else {
+            item.setAttribute('aria-checked', 'false');
+        }
+    });
+    var label = playerContainer.querySelector('[data-plyr="quality"] .plyr__menu__value');
+    if (label) {
+        label.textContent = selectedQuality === 'auto' ? 'Auto' : selectedQuality + 'p';
+    }
+}
+
+async function loadStream(url){
+    if(isLoading){isLoading=false;await new Promise(function(r){setTimeout(r,80);});}
+    if(videoElement){try{videoElement.pause();}catch(e){}}
+    
+    isLoading=true;lastUrl=url;hideError();
+    if(plyrPlayer){try{plyrPlayer.destroy();}catch(e){}plyrPlayer=null;}
+    if(hlsPlayer){try{hlsPlayer.destroy();}catch(e){}hlsPlayer=null;}
+    if(shakaPlayer){try{await shakaPlayer.destroy();}catch(e){}shakaPlayer=null;}
+
+    if(url.indexOf('##ext')!==-1 || url.indexOf('##ex')!==-1 || isFaselTarget(url)){
+        originalSourceUrl=url;
+    }
+
+    if(url.indexOf('##ext')!==-1){
+        isLoading=false;
+        showExtractOverlay('جاري استخراج الرابط...');
+        var cleanUrl = url.split('##ext')[0].trim();
+        if(window.AndroidBridge && typeof window.AndroidBridge.triggerPackerExtraction === 'function'){
+            window.AndroidBridge.triggerPackerExtraction(cleanUrl);
+        } else {
+            handlePackerExtract(url);
+        }
+        return;
+    }
+
+    if(url.indexOf('##ex')!==-1||isFaselTarget(url)){
+        isLoading=false;showExtractOverlay('جاري استخراج الرابط...');
+        var cu=url.split('##ex')[0].trim();
+        if(window.AndroidBridge&&window.AndroidBridge.triggerExtraction) {
+            window.AndroidBridge.triggerExtraction(cu);
+        }
+        return;
+    }
+
+    var t=detectType(url),manifestUri=t.hasDRM?url.split('###')[0].trim():url;
+    var container=document.querySelector('.video-player-container');
+    container.innerHTML='<video id="player" class="raw-video" crossorigin playsinline autoplay></video>';
+    videoElement=document.getElementById('player');
+
+    if(t.isHls && !t.hasDRM) {
+        try {
+            await injectScript(LIBS.hls);
+            if (!Hls.isSupported()) {
+                throw new Error("Hls.js is not supported on this engine");
+            }
+            hlsPlayer = new Hls({
+                enableWorker: true,
+                lowLatencyMode: true,
+                maxBufferLength: 4,
+                maxBufferSize: 10 * 1024 * 1024,
+                enableSoftwareAES: true
+            });
+            hlsPlayer.loadSource(manifestUri);
+            hlsPlayer.attachMedia(videoElement);
+            hlsPlayer.on(Hls.Events.MANIFEST_PARSED, function (event, data) {
+                if(!isLoading) return;
+                var availableQualities = data.levels.map(function(l) { return l.height; });
+                availableQualities = availableQualities.filter(function(q, idx) { 
+                    return availableQualities.indexOf(q) === idx; 
+                }).sort(function(a,b){return b-a;});
+                initPlyrWithHls(availableQualities);
+            });
+            hlsPlayer.on(Hls.Events.ERROR, function (event, data) {
+                if (data.fatal) {
+                    showError('خطأ في معالجة البث المباشر (HLS)');
+                }
+            });
+        } catch (err) {
+            showError('فشل تهيئة محرك البث Hls.js: ' + err.message);
+        }
+    } 
+    else if(t.isDash || t.hasDRM) {
+        try {
+            await injectScript(LIBS.shaka);
+            shaka.polyfill.installAll();
+            shakaPlayer=new shaka.Player(videoElement);
+            shakaPlayer.configure({
+                streaming:{bufferingGoal:8,rebufferingGoal:1.5,bufferBehind:10},
+                abr: { enabled: true }
+            });
+            shakaPlayer.addEventListener('error',function(ev){
+                if(!isLoading)return;isLoading=false;
+                showError('خطأ أثناء تشغيل البث المشفر');
+            });
+            if(t.hasDRM){
+                try{var kp=url.split('###')[1].split(':');shakaPlayer.configure({drm:{clearKeys:{[base64ToHex(kp[1].trim())]:base64ToHex(kp[0].trim())}}});}
+                catch(e){showError('خطأ في مفاتيح التشفير');isLoading=false;return;}
+            }
+            var mimeType=t.isDash?'application/dash+xml':'application/x-mpegurl';
+            await shakaPlayer.load(manifestUri,null,mimeType);
+            if(!isLoading)return;
+            var tracks=shakaPlayer.getVariantTracks(),heights=[],seen={};
+            tracks.forEach(function(tr){if(tr.height&&!seen[tr.height]){seen[tr.height]=true;heights.push(tr.height);}});
+            heights.sort(function(a,b){return b-a;});
+            initPlyrWithShaka(heights);
+        } catch (err) {
+            showError('فشل تشغيل مشغل البث المشفر: ' + err.message);
+        }
+    } 
+    else {
+        videoElement.src=manifestUri;
+        videoElement.addEventListener('error',function(){if(!isLoading)return;isLoading=false;showError('فشل تشغيل الفيديو');},{once:true});
+        plyrPlayer=new Plyr(videoElement,{
+            controls:['rewind','play','fast-forward','progress','current-time','mute','volume','captions','settings','pip','fullscreen'],
+            seekTime:10,
+            settings:['speed','captions'],
+            speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] },
+            fullscreen:{iosNative:true,video:true,container:'.plyr'},
+            hideControls:true,
+            clickToPlay:false
+        });
+        initCustomUI(plyrPlayer);
+    }
+}
+
+function initPlyrWithHls(heights) {
+    var plyrCfg={
+        controls:['rewind','play','fast-forward','progress','current-time','mute','volume','captions','settings','pip','fullscreen'],
+        settings:['quality','speed','captions'],
+        speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] }
+    };
+    if(heights.length>0){
+        plyrCfg.quality={
+            default:'auto',
+            options:['auto'].concat(heights),
+            forced:true,
+            onChange:function(q){
+                if(q === 'auto') {
+                    hlsPlayer.currentLevel = -1;
+                } else {
+                    var targetLevel = hlsPlayer.levels.findIndex(function(l){ return l.height === q; });
+                    if(targetLevel !== -1) hlsPlayer.currentLevel = targetLevel;
+                }
+                setTimeout(function(){ updateQualityMenuUI(q); }, 50);
+            }
+        };
+    }
+    plyrPlayer=new Plyr(videoElement,plyrCfg);
+    initCustomUI(plyrPlayer);
+}
+
+function initPlyrWithShaka(heights) {
+    var plyrCfg={
+        controls:['rewind','play','fast-forward','progress','current-time','mute','volume','captions','settings','pip','fullscreen'],
+        settings:['quality','speed','captions'],
+        speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] }
+    };
+    if(heights.length>0){
+        plyrCfg.quality={
+            default:'auto',
+            options:['auto'].concat(heights),
+            forced:true,
+            onChange:function(q){
+                if(q==='auto'){
+                    shakaPlayer.configure({abr:{enabled:true}});
+                } else {
+                    shakaPlayer.configure({abr:{enabled:false}});
+                    var t=Number(q),f=shakaPlayer.getVariantTracks().filter(function(tr){return tr.height===t;});
+                    if(f.length>0) shakaPlayer.selectVariantTrack(f.sort(function(a,b){return b.bandwidth-a.bandwidth;})[0],true);
+                }
+                setTimeout(function(){ updateQualityMenuUI(q); }, 50);
+            }
+        };
+    }
+    plyrPlayer=new Plyr(videoElement,plyrCfg);
+    initCustomUI(plyrPlayer);
+}
+
+function initCustomUI(playerInstance){
+    playerContainer=videoElement.closest('.plyr');
+    playerInstance.on('ready',function(){
+        videoElement.classList.remove('raw-video');
+        playerContainer.classList.add(modes[currentMode]);
+        var fsBtn=playerContainer.querySelector('[data-plyr="fullscreen"]');
+        if(fsBtn){
+            var nb=fsBtn.cloneNode(true);fsBtn.parentNode.replaceChild(nb,fsBtn);
+            nb.addEventListener('click',function(e){
+                e.preventDefault();e.stopPropagation();
+                playerContainer.classList.remove(modes[currentMode]);
+                currentMode=(currentMode+1)%modes.length;
+                playerContainer.classList.add(modes[currentMode]);
+                var lm={'mode-contain':'Contain','mode-cover':'Cover','mode-fill':'Stretch / Fill','mode-original':'Original Size'};
+                nb.setAttribute('aria-label',lm[modes[currentMode]]);
+            });
+        }
+        playerInstance.play();
+        isLoading=false;
+        
+        setTimeout(function() { updateQualityMenuUI('auto'); }, 300);
+        hideExtractOverlay();
+    });
+
+    playerInstance.on('playing', function() {
+        hideExtractOverlay();
+        setTimeout(function() { updateQualityMenuUI('auto'); }, 50);
+    });
+
+    var oldT=playerContainer.querySelector('.plyr__title');if(oldT)oldT.remove();
+    var oldP=playerContainer.querySelector('.plyr__playlist');if(oldP)oldP.remove();
+
+    titleElement=document.createElement('div');
+    titleElement.className='plyr__title';
+    titleElement.innerHTML=currentTitle+' <span>\uD83D\uDC4D</span>';
+    playerContainer.appendChild(titleElement);
+
+    playlistElement=document.createElement('div');
+    playlistElement.className='plyr__playlist';
+    var items='';
+    currentPlaylist.forEach(function(video,idx){
+        items+='<div class="playlist-item'+(idx===currentIndex?' active':'')+'" data-src="'+video.src+'" data-idx="'+idx+'">'+video.title+'</div>';
+    });
+    playlistElement.innerHTML='<div class="playlist-wrapper">'+items+'</div>';
+    playerContainer.appendChild(playlistElement);
+
+    playlistElement.querySelectorAll('.playlist-item').forEach(function(item){
+        item.addEventListener('click',function(e){
+            e.stopPropagation();
+            currentIndex=parseInt(item.getAttribute('data-idx'),10);
+            currentSrc=item.getAttribute('data-src');
+            currentTitle=item.textContent.trim();
+            loadStream(currentSrc);
+        });
+    });
+
+    titleElement.addEventListener('click',function(e){
+        e.stopPropagation();isPlaylistOpen=!isPlaylistOpen;
+        playerContainer.classList.toggle('playlist-open',isPlaylistOpen);
+    });
+
+    playerInstance.on('controlsshown',function(){playerContainer.classList.add('plyr--controls-visible');});
+    playerInstance.on('controlshidden',function(){playerContainer.classList.remove('plyr--controls-visible','playlist-open');isPlaylistOpen=false;});
+}
+
+window.playExtractedUrl=function(url){
+    showExtractOverlay('جارٍ الاتصال بالبث...');
+    loadStream(url);
+};
+
+window.loadBase64Playlist=function(base64Str){
+    try{
+        var bin=atob(base64Str),escaped=bin.split('').map(function(c){return'%'+('00'+c.charCodeAt(0).toString(16)).slice(-2);}).join('');
+        var data=JSON.parse(decodeURIComponent(escaped));
+        if(Array.isArray(data)&&data.length>0){currentIndex=0;currentPlaylist=data;currentSrc=data[0].src;currentTitle=data[0].title||'فيديو';loadStream(currentSrc);}
+    }catch(e){showError('خطأ في قراءة بيانات القائمة');}
+};
+
+document.addEventListener('DOMContentLoaded',function(){
+    var p=new URLSearchParams(window.location.search);
+    if(p.get('deeplink')!=='true')loadStream(currentSrc);
+});
+</script>
+</body>
+</html>
